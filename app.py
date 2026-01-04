@@ -1,37 +1,76 @@
 import streamlit as st
 from datetime import date
-import time
-
-# Importando nossos novos módulos
-from services.crud import criar_tabelas, adicionar_movimento, ler_movimentos
+from services.crud import criar_usuario, autenticar_usuario, adicionar_movimento, ler_movimentos
 from views.dashboard import show_dashboard
 from views.assinaturas import show_assinaturas
 
-st.set_page_config(page_title="Minhas Finanças Pro", layout="wide")
+st.set_page_config(page_title="Finanças Multi-User", layout="wide")
 
-# --- LOGIN ---
+# --- GERENCIAMENTO DE SESSÃO ---
 if 'logado' not in st.session_state:
     st.session_state['logado'] = False
+if 'usuario_id' not in st.session_state:
+    st.session_state['usuario_id'] = None
+if 'usuario_nome' not in st.session_state:
+    st.session_state['usuario_nome'] = ""
 
+def login_sucesso(id, nome):
+    st.session_state['logado'] = True
+    st.session_state['usuario_id'] = id
+    st.session_state['usuario_nome'] = nome
+    st.rerun()
+
+def logout():
+    st.session_state['logado'] = False
+    st.session_state['usuario_id'] = None
+    st.session_state['usuario_nome'] = ""
+    st.rerun()
+
+# --- TELA DE LOGIN / REGISTRO ---
 if not st.session_state['logado']:
-    col1, col2, col3 = st.columns([1,1,1])
+    col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        st.title("🔐 Login Supabase")
-        if st.text_input("Usuário") == "admin" and st.text_input("Senha", type="password") == "1234":
+        st.title("💰 Minhas Finanças")
+        tab_login, tab_cadastro = st.tabs(["🔐 Login", "📝 Criar Conta"])
+        
+        with tab_login:
+            email_login = st.text_input("Email")
+            senha_login = st.text_input("Senha", type="password")
             if st.button("Entrar"):
-                st.session_state['logado'] = True
-                st.rerun()
-    st.stop()
+                usuario = autenticar_usuario(email_login, senha_login)
+                if usuario:
+                    login_sucesso(usuario[0], usuario[1])
+                else:
+                    st.error("Email ou senha incorretos.")
+        
+        with tab_cadastro:
+            nome_cad = st.text_input("Seu Nome")
+            email_cad = st.text_input("Seu Email")
+            senha_cad = st.text_input("Crie uma Senha", type="password")
+            if st.button("Cadastrar"):
+                if criar_usuario(nome_cad, email_cad, senha_cad):
+                    st.success("Conta criada! Faça login na aba ao lado.")
+                else:
+                    st.error("Erro ao criar. Email já existe?")
+    st.stop() # Para o código aqui se não estiver logado
 
-# --- SISTEMA ---
-criar_tabelas() # Garante que as tabelas existem no Supabase
+# ========================================================
+# ÁREA LOGADA (SÓ CHEGA AQUI SE TIVER LOGADO)
+# ========================================================
 
-LISTA_CATEGORIAS = ["Alimentação", "Moradia", "Transporte", "Assinaturas/Streaming", "Lazer", "Saúde", "Receita (Salário)", "Outros"]
+user_id = st.session_state['usuario_id']
+user_nome = st.session_state['usuario_nome']
 
-# --- SIDEBAR GLOBAL ---
+# --- SIDEBAR ---
+st.sidebar.write(f"Olá, **{user_nome}**! 👋")
+st.sidebar.button("Sair", on_click=logout)
+st.sidebar.markdown("---")
+
 st.sidebar.title("Menu")
 navegacao = st.sidebar.radio("Ir para:", ["Dashboard", "Assinaturas"])
 st.sidebar.markdown("---")
+
+LISTA_CATEGORIAS = ["Alimentação", "Moradia", "Transporte", "Assinaturas/Streaming", "Lazer", "Saúde", "Receita (Salário)", "Outros"]
 
 with st.sidebar.expander("➕ Nova Transação"):
     with st.form("add_form"):
@@ -45,17 +84,15 @@ with st.sidebar.expander("➕ Nova Transação"):
         
         if st.form_submit_button("Salvar"):
             val_final = v * -1 if t == "Despesa" else v
-            adicionar_movimento(d, c, desc, t, val_final, f, p)
-            st.success("Salvo no Supabase!")
+            # IMPORTANTE: Passamos o user_id aqui!
+            adicionar_movimento(user_id, d, c, desc, t, val_final, f, p)
+            st.success("Salvo!")
             st.rerun()
 
-st.sidebar.button("Sair", on_click=lambda: st.session_state.update(logado=False))
+# --- CARREGA DADOS DO USUÁRIO ESPECÍFICO ---
+df = ler_movimentos(user_id) # O Filtro Mágico acontece aqui!
 
-# Carrega dados uma vez
-df = ler_movimentos()
-
-# --- ROTEAMENTO DE TELAS ---
 if navegacao == "Dashboard":
-    show_dashboard(df, LISTA_CATEGORIAS)
+    show_dashboard(user_id, df, LISTA_CATEGORIAS)
 elif navegacao == "Assinaturas":
     show_assinaturas(df)

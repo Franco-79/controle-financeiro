@@ -2,41 +2,53 @@ import streamlit as st
 import pandas as pd
 from services.crud import adicionar_movimento, mudar_status_pago, atualizar_movimento, excluir_movimento, salvar_meta, ler_metas
 
-def show_dashboard(df_bruto, lista_categorias):
+# Agora a função recebe o user_id vindo do Login
+def show_dashboard(user_id, df_bruto, lista_categorias):
     st.title("📊 Painel Financeiro")
 
     if df_bruto.empty:
-        st.info("Banco de dados vazio. Use a barra lateral para adicionar o primeiro registro.")
-        return
+        st.info("Bem-vindo! Comece adicionando seus dados na barra lateral.")
+        # Não damos return aqui para permitir ver a sidebar e adicionar itens
 
-    # Preparar dados
-    df_bruto['data'] = pd.to_datetime(df_bruto['data'])
-    df_bruto['mes_ano'] = df_bruto['data'].dt.strftime('%Y-%m')
-    lista_meses = sorted(df_bruto['mes_ano'].unique(), reverse=True)
+    # Preparar dados (só faz se tiver dados)
+    if not df_bruto.empty:
+        df_bruto['data'] = pd.to_datetime(df_bruto['data'])
+        df_bruto['mes_ano'] = df_bruto['data'].dt.strftime('%Y-%m')
+        lista_meses = sorted(df_bruto['mes_ano'].unique(), reverse=True)
+    else:
+        lista_meses = []
 
-    # --- Ferramentas Laterais (Clonar) ---
+    # --- Ferramentas ---
     with st.sidebar.expander("🛠️ Ferramentas"):
         st.markdown("**🔄 Clonar Mês**")
-        mes_origem = st.selectbox("Copiar de:", lista_meses)
-        if st.button("Clonar Pendências"):
-            fixos = df_bruto[(df_bruto['mes_ano'] == mes_origem) & (df_bruto['fixo'] == True)]
-            if not fixos.empty:
-                for _, row in fixos.iterrows():
-                    nova_data = row['data'] + pd.DateOffset(months=1)
-                    adicionar_movimento(nova_data.date(), row['categoria'], row['descricao'], row['tipo'], row['valor'], True, False)
-                st.success("Gerado!")
-                st.rerun()
-            else:
-                st.warning("Nada fixo.")
-    
+        if lista_meses:
+            mes_origem = st.selectbox("Copiar de:", lista_meses)
+            if st.button("Clonar Pendências"):
+                fixos = df_bruto[(df_bruto['mes_ano'] == mes_origem) & (df_bruto['fixo'] == True)]
+                if not fixos.empty:
+                    for _, row in fixos.iterrows():
+                        nova_data = row['data'] + pd.DateOffset(months=1)
+                        # Passamos o user_id aqui!
+                        adicionar_movimento(user_id, nova_data.date(), row['categoria'], row['descricao'], row['tipo'], row['valor'], True, False)
+                    st.success("Gerado!")
+                    st.rerun()
+                else:
+                    st.warning("Nada fixo.")
+        else:
+            st.caption("Cadastre dados primeiro.")
+
     # --- Metas ---
     with st.sidebar.expander("🎯 Metas"):
         cat_meta = st.selectbox("Categoria", [c for c in lista_categorias if "Receita" not in c])
         valor_meta = st.number_input("Limite (R$)", min_value=0.0, step=50.0)
         if st.button("Salvar Meta"):
-            salvar_meta(cat_meta, valor_meta)
+            salvar_meta(user_id, cat_meta, valor_meta) # Passamos user_id
             st.success("Salvo!")
             st.rerun()
+
+    # Se não houver dados, paramos aqui o visual principal
+    if df_bruto.empty:
+        return
 
     # --- Filtro Principal ---
     col1, col2 = st.columns([1, 3])
@@ -45,7 +57,7 @@ def show_dashboard(df_bruto, lista_categorias):
     
     df_mes = df_bruto[df_bruto['mes_ano'] == mes_selecionado].copy()
 
-    # --- Cards ---
+    # Cards e Métricas
     receitas = df_mes[df_mes["valor"] > 0]["valor"].sum()
     despesas = df_mes[df_mes["valor"] < 0]["valor"].sum()
     saldo = receitas + despesas
@@ -60,7 +72,7 @@ def show_dashboard(df_bruto, lista_categorias):
     st.divider()
 
     # --- Monitor de Metas ---
-    df_metas = ler_metas()
+    df_metas = ler_metas(user_id) # Passamos user_id
     if not df_metas.empty:
         gastos_cat = df_mes[df_mes["valor"] < 0].copy()
         gastos_cat["valor"] = gastos_cat["valor"].abs()
@@ -84,7 +96,6 @@ def show_dashboard(df_bruto, lista_categorias):
 
     # --- Gráficos e Tabelas ---
     c_graf, c_tab = st.columns([1, 2])
-    
     with c_graf:
         st.subheader("Gráfico")
         df_desp = df_mes[df_mes["valor"] < 0].copy()
@@ -107,7 +118,7 @@ def show_dashboard(df_bruto, lista_categorias):
             t1, t2, t3 = st.tabs(["Status", "Editar", "Excluir"])
             with t1:
                 if st.button("Mudar Status Pago/Pendente"):
-                    mudar_status_pago(id_sel, not item_atual['pago'])
+                    mudar_status_pago(id_sel, user_id, not item_atual['pago']) # User ID aqui
                     st.success("Feito!")
                     st.rerun()
             with t2:
@@ -118,11 +129,11 @@ def show_dashboard(df_bruto, lista_categorias):
                     n_dat = st.date_input("Data", item_atual['data'])
                     n_fix = st.checkbox("Fixo?", item_atual['fixo'])
                     if st.form_submit_button("Salvar Edição"):
-                        atualizar_movimento(id_sel, n_dat, n_cat, n_desc, n_val, n_fix)
+                        atualizar_movimento(id_sel, user_id, n_dat, n_cat, n_desc, n_val, n_fix) # User ID aqui
                         st.success("Atualizado!")
                         st.rerun()
             with t3:
                 if st.button("Excluir Definitivamente"):
-                    excluir_movimento(id_sel)
+                    excluir_movimento(id_sel, user_id) # User ID aqui
                     st.success("Tchau!")
                     st.rerun()
